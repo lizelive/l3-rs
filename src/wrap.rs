@@ -8,38 +8,99 @@
 
 use std::ops::{Deref, DerefMut};
 
+macro_rules! implicit {
+    // allow empty
+    () => {};
 
-macro_rules! implicit_helper {
+    // allow multiple items
+    (
+        $(#[$attrs:meta])? // attributes, possibly empty
+        $vis:vis // visibility, possibly empty
+        type // trait keyword
+        $new_type:ident = $type:ty; // trait signature
+        $($rest:tt)*
+    ) => {
+        $(#[$attrs])?
+        #[repr(transparent)]
+        $vis // visibility, possibly empty
+        struct // trait keyword
+        $new_type($type); // trait signature
+
+        impl Deref for $new_type {
+            type Target = $type;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl DerefMut for $new_type {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
+            }
+        }
+
+        impl From<$type> for $new_type  {
+            fn from(value: $type) -> $new_type {
+                Self(value)
+            }
+        }
+
+        impl From<$new_type> for $type {
+            fn from(value: $new_type) -> Self {
+                value.0
+            }
+        }
+
+        implicit!($($rest)*);
+    };
     (
         $vis:vis // visibility, possibly empty
-        trait // trait keyword
-        $impl_type_param:ident // the type parameter for the impl block 
-        $trait:path // Typepath of Trait
-        { $($generic_params:tt)*}// GenericParams, ends with ,
-        { $($type_param_bounds:tt)+}// TypeParamBounds. for some reason, the first one can't
-        { $($body:tt)* } // body, while block matches, it doesn't work for some reason
+        impl // trait keyword
+        $ext_trait_id:ident for $type:ty // trait signature
+        {
+            // functions
+            $(
+                $fn_vis:vis // visibility, possibly empty
+                fn // fn keyword
+                $fn_name:ident // fn name
+                ( $($fn_arg:tt)* ) // fn args
+                $(-> $fn_ret:ty)? // fn return type
+                $fn_body:block // fn body
+            )*
+        }
+        $($rest:tt)*
     ) => {
+        impl // trait keyword
+        $ext_trait_id
+        for
+        $type // with next line forms the Typepath of Trait
+        {
+            // functions
+            $(
+                fn // fn keyword
+                $fn_name // fn name
+                ( $($fn_arg)* ) // fn args
+                $(-> $fn_ret)? // fn return type
+                $fn_body // fn body
+            )*
+        }
+
         $vis // visibility, possibly empty
         trait // trait keyword
-        $ti // with next line forms the Typepath of Trait
-        <$($generic_params)*> //  GenericParams
-        : $($type_param_bounds)+ // TypeParamBounds
+        $ext_trait_id // trait signature
         {
-            $($body)* // body
+            // functions
+            $(
+                fn // fn keyword
+                $fn_name // fn name
+                ( $($fn_arg)* ) // fn args
+                $(-> $fn_ret)? // fn return type
+                ;
+            )*
         }
-        // SelfType should be unique type parameter
-        impl <$($generic_params)* $impl_type_param>
-            $trait // Typepath of Trait
-            for $impl_type_param // type of match
-            where $impl_type_param: $($type_param_bounds)+ // TypeParamBounds
-        {
-
-        }
-    }; 
-}
-
-macro_rules! implicit {
-
+        implicit!($($rest)*);
+    };
 
     // https://doc.rust-lang.org/reference/items/traits.html
     // https://doc.rust-lang.org/reference/paths.html?highlight=path#paths
@@ -51,6 +112,7 @@ macro_rules! implicit {
         : $c0:ident $(<$($c0g:ty),+>)? $(+ $cn:path)* // TypeParamBounds. for some reason, the first one can't
         // where clause should go here
         { $($body:tt)* } // body, while block matches, it doesn't work for some reason
+        $($rest:tt)*
     ) => {
         $vis // visibility, possibly empty
         trait // trait keyword
@@ -68,29 +130,36 @@ macro_rules! implicit {
         {
 
         }
+        implicit!($($rest)*);
     };
-
-    // ($vis:vis trait $ti:ident $(<$($gen:ident),+>)? : $c0:ident $(+ $cn:path)+ { $($body:tt)* } ) => {
-    //     $vis trait $ti $(<$($gen),+>)? : $c0 $(+ $cn)+ {
-    //         $($body)*
-    //     }
-    //     impl <SelfType $(,$($gen),+)?> $ti $(<$($gen),+>)? for SelfType
-    //     where SelfType: $c0 $(+ $cn)+,
-    //     {
-    //     }
-    // };
 }
 
+
 implicit!(
+    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, ::serde::Serialize, ::serde::Deserialize)]
+    pub type WrapperString = String;
+
+    pub type WrapperF64 = f64;
+
     pub trait WrapperGeneric1: Deref + DerefMut {
         fn uh_oh1(&self) {}
     }
-);
-implicit!(
+
     pub trait WrapperGenericImplicit<Inner>:
         From<Inner> + Into<Inner> + Deref<Target = Inner> + DerefMut<Target = Inner>
     {
         fn uh_oh2(&self) {}
+    }
+
+    pub impl StringExt for str {
+        fn uh_oh3(&self) -> bool {
+            true
+        }
+    }
+    pub impl FloatExt for f64 {
+        fn uh_oh4(&self) -> bool {
+            true
+        }
     }
 );
 
@@ -101,9 +170,19 @@ implicit!(
 
 #[test]
 fn test() {
-    let mut x = FloatWrap::from(1.1);
+    let x = WrapperF64::from(1.1);
     x.uh_oh1();
     x.uh_oh2();
+
+    let hello = WrapperString::from("hello".to_string());
+    let world = WrapperString::from("world".to_string());
+
+    let json = serde_json::to_string_pretty(&hello).unwrap();
+
+    println!("{}", json);
+
+    assert_ne!(hello, world);
+    "hello".uh_oh3();
 }
 
 //implicit!(pub trait WrapperGenericImplicit<Inner> : From<Inner> + Into<Inner> + Deref<Target = Inner> + DerefMut<Target = Inner>{
@@ -241,32 +320,7 @@ fn test() {
 // //     }
 // // }
 
-struct FloatWrap(f64);
 
-impl DerefMut for FloatWrap {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl Deref for FloatWrap {
-    type Target = f64;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl From<f64> for FloatWrap {
-    fn from(value: f64) -> Self {
-        Self(value)
-    }
-}
-
-impl From<FloatWrap> for f64 {
-    fn from(value: FloatWrap) -> Self {
-        value.0
-    }
-}
 
 // // impl Wrapper for FloatWrap {
 // //     type Inner = f64;
